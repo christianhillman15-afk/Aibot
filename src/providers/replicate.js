@@ -189,3 +189,18 @@ export function buildLipsync(p = {}) {
     ...(p.advancedInput || {}),
   });
 }
+
+export function buildUpscale(p = {}) {
+  // topazlabs/video-upscale style: a video + a target resolution.
+  return defined({
+    video: p.video,
+    ...(p.targetInput || {}),
+    ...(p.advancedInput || {}),
+  });
+}
+
+/** Actual compute seconds Replicate billed for a prediction (0 if absent). */
+export function predictSeconds(prediction) {
+  const t = prediction?.metrics?.predict_time;
+  return typeof t === "number" && Number.isFinite(t) ? t : 0;
+}

@@ -64,6 +64,14 @@ Model slugs are set in `.env` and can be swapped without touching code:
 2. **Generate** — the job runs in the background; you watch live progress (queued → generating → downloading → assembling → done) and the finished video plays inline.
 3. Everything lands in the **Library** on the right — play, download, or delete. Long jobs can be canceled mid-run (stops paying for compute).
 
+### Length, 4K, and cost accuracy
+
+- **Longer than one clip** — most models generate only a few seconds per run, so if you set a **Duration** longer than `CLIP_SEGMENT_SECONDS` (default 5s), the app generates several segments and stitches them, each continuing from the previous clip's **last frame** for visual continuity (e.g. 15s → three 5s clips). Capped at `MAX_TARGET_SECONDS` (default 20s).
+- **4K** — the generation models on Replicate top out around 1080p, so **4K is a separate upscale pass**. Tick **Upscale to 4K** and each segment is run through `MODEL_UPSCALE` (`topazlabs/video-upscale` by default) before stitching. This adds cost — the estimate updates to reflect it.
+- **Actual cost** — after a job finishes, the cost shown switches from a flat estimate to an **actual figure derived from Replicate's reported compute time** (`predict_time` × `COST_PER_COMPUTE_SEC`). Tune that rate to your models' hardware for an accurate number.
+
+**So: a 15-second 4K clip** = 3 stitched segments + 3 upscale passes. On the cheap Draft tier that's roughly **$1–2**; on Premium models with native audio it's more like **$7–8**. See the estimate before you commit.
+
 ## Security notes
 
 - Bearer-token auth gates the whole API and the UI. Use a strong `AUTH_TOKEN`; consider HTTPS.

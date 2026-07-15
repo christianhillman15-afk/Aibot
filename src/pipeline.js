@@ -1,11 +1,12 @@
 import path from "node:path";
+import fs from "node:fs";
 import { config, COST_ESTIMATE_USD, modelForTier, tierCostMult } from "./config.js";
 import {
-  runModel, outputUrls,
-  buildTextToVideo, buildImageToVideo, buildTTS, buildAvatar,
+  runModel, outputUrls, predictSeconds,
+  buildTextToVideo, buildImageToVideo, buildTTS, buildAvatar, buildUpscale,
 } from "./providers/replicate.js";
 import { saveJob, downloadOutput, jobOutputDir } from "./jobs.js";
-import { muxNarration, concatVideos, burnCaption, probeDuration } from "./ffmpeg.js";
+import { muxNarration, concatVideos, burnCaption, probeDuration, extractLastFrame } from "./ffmpeg.js";
 
 // Each mode is an async orchestration over one or more Replicate models plus,
 // for explainer, local ffmpeg assembly. Progress is streamed via onProgress.
@@ -19,8 +20,15 @@ export async function runJob(job, { signal, onProgress }) {
     onProgress?.({ type: "progress", text, status: job.status, ...extra });
   };
   const addCost = (usd) => { job.costEstimateUSD = Math.round((job.costEstimateUSD + usd) * 1000) / 1000; };
+  // Live cost: accumulate Replicate's actual compute time and convert to $.
+  const addCompute = (pred) => {
+    job.computeSeconds = Math.round(((job.computeSeconds || 0) + predictSeconds(pred)) * 100) / 100;
+    job.actualCostUSD = Math.round(job.computeSeconds * config.costPerComputeSec * 1000) / 1000;
+  };
 
   job.status = "running";
+  job.computeSeconds = 0;
+  job.actualCostUSD = 0;
   emit("Starting…");
 
   const p = job.params;
@@ -32,32 +40,77 @@ export async function runJob(job, { signal, onProgress }) {
       case "short": {
         const isShort = job.mode === "short";
         const aspectRatio = p.aspectRatio || (isShort ? "9:16" : "16:9");
-        const usingImage = Boolean(p.image);
         const tier = p.tier || config.defaultTier;
-        const slug = modelForTier(tier, usingImage ? "i2v" : "t2v");
-        emit(`Generating video with ${slug} (${tier})…`);
-        const input = usingImage
-          ? buildImageToVideo({ ...p, aspectRatio })
-          : buildTextToVideo({ ...p, aspectRatio });
-        const pred = await runModel(slug, input, { signal, onUpdate: logForModel("video") });
-        addCost((usingImage ? COST_ESTIMATE_USD.imageToVideo : COST_ESTIMATE_USD.textToVideo) * tierCostMult(tier));
+        const seg = config.clipSegmentSeconds;
+        const target = Math.min(Number(p.duration) || seg, config.maxTargetSeconds);
+        const nSegments = Math.max(1, Math.ceil(target / seg));
 
-        const [url] = outputUrls(pred.output);
-        if (!url) throw new Error("Model returned no video output.");
-        emit("Downloading result…");
-        let out = await downloadOutput(job.id, url, "video");
+        const localSegments = []; // files to concat (upscaled if requested)
+        let prevBasePath = null;  // previous segment's base-res clip, for last-frame continuation
+
+        for (let i = 0; i < nSegments; i++) {
+          const label = nSegments > 1 ? `segment ${i + 1}/${nSegments}` : "video";
+          let slug, input, usingImage;
+          if (i === 0) {
+            usingImage = Boolean(p.image);
+            slug = modelForTier(tier, usingImage ? "i2v" : "t2v");
+            input = usingImage
+              ? buildImageToVideo({ ...p, aspectRatio, duration: seg })
+              : buildTextToVideo({ ...p, aspectRatio, duration: seg });
+          } else {
+            // Continue from the previous clip's last frame for visual continuity.
+            usingImage = true;
+            const framePath = path.join(jobOutputDir(job.id), `frame-${i}.png`);
+            await extractLastFrame(prevBasePath, framePath, { signal });
+            const frameUri = `data:image/png;base64,${fs.readFileSync(framePath).toString("base64")}`;
+            slug = modelForTier(tier, "i2v");
+            input = buildImageToVideo({ prompt: p.prompt, image: frameUri, aspectRatio, duration: seg, advancedInput: p.advancedInput });
+          }
+
+          emit(`Generating ${label} with ${slug} (${tier})…`);
+          const pred = await runModel(slug, input, { signal, onUpdate: logForModel(label) });
+          addCompute(pred);
+          addCost((usingImage ? COST_ESTIMATE_USD.imageToVideo : COST_ESTIMATE_USD.textToVideo) * tierCostMult(tier));
+          const [url] = outputUrls(pred.output);
+          if (!url) throw new Error(`${label}: model returned no video output.`);
+
+          emit(`Downloading ${label}…`);
+          const base = await downloadOutput(job.id, url, `segment-${i + 1}`);
+          prevBasePath = base.absPath;
+
+          let segFile = base.absPath;
+          if (p.upscale4k) {
+            emit(`Upscaling ${label} to 4K with ${config.models.upscale}…`);
+            const upPred = await runModel(config.models.upscale,
+              buildUpscale({ video: url, targetInput: config.upscaleInput, advancedInput: p.advancedUpscale }),
+              { signal, onUpdate: logForModel(`${label} 4K upscale`) });
+            addCompute(upPred);
+            addCost(COST_ESTIMATE_USD.upscale);
+            const [upUrl] = outputUrls(upPred.output);
+            if (!upUrl) throw new Error(`${label}: upscaler returned no output.`);
+            const up = await downloadOutput(job.id, upUrl, `segment-${i + 1}-4k`);
+            segFile = up.absPath;
+          }
+          localSegments.push(segFile);
+        }
+
+        emit(nSegments > 1 ? "Stitching segments…" : "Finalizing…");
+        let finalPath = path.join(jobOutputDir(job.id), isShort ? "short.mp4" : "clip.mp4");
+        await concatVideos(localSegments, finalPath, { signal });
 
         if (isShort && p.caption) {
           emit("Burning caption…");
           const captioned = path.join(jobOutputDir(job.id), "short-captioned.mp4");
           try {
-            await burnCaption(out.absPath, p.caption, captioned, { signal });
-            out = { file: path.basename(captioned), url: `/outputs/${job.id}/${path.basename(captioned)}`, absPath: captioned };
+            await burnCaption(finalPath, p.caption, captioned, { signal });
+            finalPath = captioned;
           } catch (e) {
             emit(`Caption step skipped (${e.message.slice(0, 80)}).`);
           }
         }
-        job.outputs.push({ file: out.file, url: out.url, kind: "video" });
+        const dur = await probeDuration(finalPath).catch(() => 0);
+        const fn = path.basename(finalPath);
+        job.outputs.push({ file: fn, url: `/outputs/${job.id}/${fn}`, kind: "video", durationSec: Math.round(dur) });
         break;
       }
 
@@ -69,6 +122,7 @@ export async function runJob(job, { signal, onProgress }) {
           const ttsPred = await runModel(config.models.tts,
             buildTTS({ text: p.narration, voice: p.voice || config.ttsVoice, advancedInput: p.advancedTts }),
             { signal, onUpdate: logForModel("voiceover") });
+          addCompute(ttsPred);
           addCost(COST_ESTIMATE_USD.tts);
           [audioUrl] = outputUrls(ttsPred.output);
           if (!audioUrl) throw new Error("Voiceover model returned no audio.");
@@ -81,6 +135,7 @@ export async function runJob(job, { signal, onProgress }) {
         const pred = await runModel(config.models.avatar,
           buildAvatar({ image: p.image, audio, prompt: p.prompt, advancedInput: p.advancedInput }),
           { signal, onUpdate: logForModel("avatar") });
+        addCompute(pred);
         addCost(COST_ESTIMATE_USD.avatar);
 
         const [url] = outputUrls(pred.output);
@@ -105,6 +160,7 @@ export async function runJob(job, { signal, onProgress }) {
           const ttsPred = await runModel(config.models.tts,
             buildTTS({ text: scene.narration, voice: p.voice || config.ttsVoice, advancedInput: p.advancedTts }),
             { signal, onUpdate: logForModel(`scene ${n} voiceover`) });
+          addCompute(ttsPred);
           addCost(COST_ESTIMATE_USD.tts);
           const [audioUrl] = outputUrls(ttsPred.output);
           if (!audioUrl) throw new Error(`Scene ${n}: voiceover model returned no audio.`);
@@ -115,6 +171,7 @@ export async function runJob(job, { signal, onProgress }) {
           const vidPred = await runModel(modelForTier(tier, "t2v"),
             buildTextToVideo({ prompt: scene.visualPrompt, aspectRatio, advancedInput: p.advancedVideo }),
             { signal, onUpdate: logForModel(`scene ${n} visuals`) });
+          addCompute(vidPred);
           addCost(COST_ESTIMATE_USD.textToVideo * tierCostMult(tier));
           const [vidUrl] = outputUrls(vidPred.output);
           if (!vidUrl) throw new Error(`Scene ${n}: video model returned no output.`);
@@ -145,7 +202,11 @@ export async function runJob(job, { signal, onProgress }) {
 
     job.status = "done";
     emit("Done.");
-    onProgress?.({ type: "done", outputs: job.outputs, costEstimateUSD: job.costEstimateUSD });
+    onProgress?.({
+      type: "done", outputs: job.outputs,
+      costEstimateUSD: job.costEstimateUSD,
+      actualCostUSD: job.actualCostUSD, computeSeconds: job.computeSeconds,
+    });
   } catch (err) {
     job.status = signal?.aborted ? "canceled" : "error";
     job.error = String(err?.message || err);

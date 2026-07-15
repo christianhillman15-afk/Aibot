@@ -31,7 +31,26 @@ export const config = {
     tts: str(process.env.MODEL_TTS, "jaaari/kokoro-82m"),
     avatar: str(process.env.MODEL_AVATAR, "bytedance/omni-human"),
     lipsync: str(process.env.MODEL_LIPSYNC, "sync/lipsync-2"),
+    upscale: str(process.env.MODEL_UPSCALE, "topazlabs/video-upscale"),
   },
+
+  // Extra input merged into the upscale model's request. The target-resolution
+  // key varies by upscaler — edit UPSCALE_INPUT_JSON if 4K doesn't take.
+  upscaleInput: (() => {
+    try { return JSON.parse(process.env.UPSCALE_INPUT_JSON || '{"target_resolution":"4k"}'); }
+    catch { return { target_resolution: "4k" }; }
+  })(),
+
+  // Stitching: single generations cap at a few seconds on most models, so to
+  // reach a longer target we generate N segments and concat them. Each segment
+  // continues from the previous clip's last frame for visual continuity.
+  clipSegmentSeconds: num(process.env.CLIP_SEGMENT_SECONDS, 5),
+  maxTargetSeconds: num(process.env.MAX_TARGET_SECONDS, 20),
+
+  // Live cost: Replicate reports actual compute time (predict_time) per run.
+  // We multiply by this $/compute-second rate (hardware-dependent — tune it to
+  // your models) to show a real-usage figure alongside the flat estimate.
+  costPerComputeSec: num(process.env.COST_PER_COMPUTE_SEC, 0.0012),
 
   // Quality tiers = the cost lever. Draft is the cost-efficient default: fast,
   // cheap model variants. Premium swaps in flagship models (better motion +
@@ -79,6 +98,7 @@ export const COST_ESTIMATE_USD = {
   tts: num(process.env.COST_TTS, 0.02),
   avatar: num(process.env.COST_AVATAR, 0.5),
   lipsync: num(process.env.COST_LIPSYNC, 0.4),
+  upscale: num(process.env.COST_UPSCALE, 0.5),
 };
 
 export const MODES = ["clip", "short", "explainer", "avatar"];

@@ -50,6 +50,15 @@ export async function muxNarration(videoFile, audioFile, outFile, { signal } = {
   return outFile;
 }
 
+/** Grab the last frame of a video as a PNG — used to continue the next segment. */
+export async function extractLastFrame(videoFile, outImage, { signal } = {}) {
+  await run("ffmpeg", [
+    "-y", "-sseof", "-0.2", "-i", videoFile,
+    "-frames:v", "1", "-update", "1", "-q:v", "2", outImage,
+  ], { signal });
+  return outImage;
+}
+
 /** Concatenate scene clips into one video (re-encode for safe concatenation). */
 export async function concatVideos(files, outFile, { signal } = {}) {
   if (files.length === 1) {

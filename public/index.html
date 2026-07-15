@@ -219,6 +219,9 @@ function renderForm(){
         <div><label>Duration (sec)</label><input type="text" id="f_dur" value="5" inputmode="numeric"></div>
         <div><label>Resolution</label><select id="f_res"><option value="">model default</option><option>720p</option><option>1080p</option></select></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+        <input type="checkbox" id="f_4k" style="width:auto"> Upscale to 4K (extra upscale pass — raises cost)</label>
+      <div class="hint" id="stitchNote"></div>
       ${isShort?`<label>On-screen caption (optional, burned in)</label><input type="text" id="f_caption" placeholder="POV: your morning just got an upgrade">`:``}
       <details><summary>Advanced (raw model input override — JSON)</summary>
         <label>advancedInput</label><textarea id="f_adv" placeholder='{"negative_prompt":"blurry, low quality"}'></textarea>
@@ -251,6 +254,7 @@ function renderForm(){
   if(mode==="explainer"){ $("addScene").onclick=()=>addScene(); addScene(); addScene(); }
   updateEstimate();
   ["f_prompt","f_dur","f_narr"].forEach(id=>$(id)?.addEventListener("input",updateEstimate));
+  $("f_4k")?.addEventListener("change",updateEstimate);
 }
 
 function addScene(){
@@ -290,11 +294,18 @@ function wireUploads(){
 }
 
 // ---------- estimate + collect ----------
-const COST={clip:0.25,short:0.25,avatar:0.5,tts:0.02,t2v:0.25};
+const COST={clip:0.25,short:0.25,avatar:0.5,tts:0.02,t2v:0.25,upscale:0.5};
+const SEG=5, MAXT=20;
 function updateEstimate(){
   const mult=tiers[sel.tier]?.costMult??1;
   let est=0;
-  if(mode==="clip"||mode==="short")est=COST.clip*mult;
+  if(mode==="clip"||mode==="short"){
+    const dur=Math.min(Number($("f_dur")?.value)||SEG,MAXT);
+    const segs=Math.max(1,Math.ceil(dur/SEG));
+    const up=$("f_4k")?.checked?COST.upscale:0;
+    est=segs*(COST.clip*mult+up);
+    if($("stitchNote"))$("stitchNote").textContent=segs>1?`${dur}s → ${segs} clips stitched (~${SEG}s each, continued from the last frame).`:"";
+  }
   else if(mode==="avatar")est=COST.avatar+($("f_narr")?.value.trim()?COST.tts:0);
   else if(mode==="explainer")est=($("scenes")?.children.length||0)*(COST.t2v*mult+COST.tts);
   $("est").textContent="≈ $"+est.toFixed(2)+" (rough estimate"+(tiers[sel.tier]?", "+sel.tier+" tier":"")+")";
@@ -309,6 +320,7 @@ function collect(){
     return {prompt,tier:sel.tier,image:uploads.image,
       aspectRatio:$("f_ar").value,duration:$("f_dur").value?Number($("f_dur").value):undefined,
       resolution:$("f_res").value||undefined,caption:$("f_caption")?.value.trim()||undefined,
+      upscale4k:$("f_4k")?.checked||undefined,
       advancedInput:parseAdv()};
   }
   if(mode==="avatar"){
@@ -366,18 +378,22 @@ function streamJob(id){
     if(evt.type==="state"){
       (evt.progress||[]).forEach(p=>log(p.text));
       if(evt.step)$("liveStep").textContent=evt.step;
-      if(evt.status==="done")showOutputs(evt.outputs,evt.costEstimateUSD);
+      if(evt.status==="done")showOutputs(evt);
       if(evt.status==="error")$("liveStep").textContent="Error: "+(evt.error||"failed");
     }else if(evt.type==="progress"){$("liveStep").textContent=evt.text;log(evt.text);}
     else if(evt.type==="model"){log("  ["+evt.label+"] "+evt.status);}
-    else if(evt.type==="done"){$("liveStep").textContent="Done ✓";showOutputs(evt.outputs,evt.costEstimateUSD);}
+    else if(evt.type==="done"){$("liveStep").textContent="Done ✓";showOutputs(evt);}
     else if(evt.type==="error"){$("liveStep").textContent="Error: "+evt.text;log("ERROR: "+evt.text);}
     else if(evt.type==="canceled"){$("liveStep").textContent="Canceled";}
     else if(evt.type==="end"){currentJobId=null;}
   }
-  function showOutputs(outputs,cost){
-    $("liveOut").innerHTML=(outputs||[]).map(o=>`<video controls src="${o.url}"></video>`).join("")+
-      (cost!=null?`<div class="hint">≈ $${cost} estimated</div>`:"");
+  function showOutputs(evt){
+    const outputs=evt.outputs||[];
+    let cost="";
+    if(evt.actualCostUSD!=null&&evt.computeSeconds)cost=`actual: ≈ $${evt.actualCostUSD} (${evt.computeSeconds}s compute)`;
+    else if(evt.costEstimateUSD!=null)cost=`≈ $${evt.costEstimateUSD} estimated`;
+    $("liveOut").innerHTML=outputs.map(o=>`<video controls src="${o.url}"></video>`).join("")+
+      (cost?`<div class="hint">${cost}</div>`:"");
   }
 }
 
@@ -397,7 +413,7 @@ async function refreshJobs(){
         `<div style="padding:24px;text-align:center;color:var(--dim)">${badge(j.status)} ${esc(j.step||"")}</div>`)+
       `<div class="title">${esc(j.title||"")}</div>
        <div class="meta"><span class="m-mode">${esc(j.mode)}</span> ${badge(j.status)}
-       <span>≈ $${(j.costEstimateUSD||0).toFixed?(j.costEstimateUSD).toFixed(2):j.costEstimateUSD}</span>
+       <span title="${j.actualCostUSD!=null&&j.computeSeconds?"actual, from Replicate compute time":"estimate"}">${costLabel(j)}</span>
        <span class="m-act">${vid?`<a href="${vid.url}" download>download</a>`:""}<span class="del" data-id="${j.id}" data-run="${j.status==='running'||j.status==='queued'}">delete</span></span></div>`;
     card.querySelector(".del").onclick=async(e)=>{
       const id=e.target.dataset.id;
@@ -408,6 +424,10 @@ async function refreshJobs(){
   }
 }
 function badge(s){return `<span class="badge ${s}">${s}</span>`;}
+function costLabel(j){
+  if(j.actualCostUSD!=null&&j.computeSeconds)return "≈ $"+Number(j.actualCostUSD).toFixed(2);
+  return "≈ $"+Number(j.costEstimateUSD||0).toFixed(2);
+}
 $("refresh").onclick=refreshJobs;
 
 // ---------- tabs ----------

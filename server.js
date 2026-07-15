@@ -84,7 +84,12 @@ function start(job) {
 function estimateCost(mode, params) {
   const c = COST_ESTIMATE_USD;
   const mult = tierCostMult(params.tier || config.defaultTier);
-  if (mode === "clip" || mode === "short") return (params.image ? c.imageToVideo : c.textToVideo) * mult;
+  if (mode === "clip" || mode === "short") {
+    const target = Math.min(Number(params.duration) || config.clipSegmentSeconds, config.maxTargetSeconds);
+    const segments = Math.max(1, Math.ceil(target / config.clipSegmentSeconds));
+    const perSeg = (params.image ? c.imageToVideo : c.textToVideo) * mult + (params.upscale4k ? c.upscale : 0);
+    return segments * perSeg;
+  }
   if (mode === "avatar") return c.avatar + (params.narration ? c.tts : 0);
   if (mode === "explainer") return (params.scenes?.length || 0) * (c.textToVideo * mult + c.tts);
   return 0;
@@ -172,7 +177,7 @@ app.get("/api/jobs/:id/stream", (req, res) => {
 
   const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
   // Replay current state so a late subscriber isn't stuck waiting.
-  send({ type: "state", status: job.status, step: job.step, progress: job.progress, outputs: job.outputs, error: job.error, costEstimateUSD: job.costEstimateUSD });
+  send({ type: "state", status: job.status, step: job.step, progress: job.progress, outputs: job.outputs, error: job.error, costEstimateUSD: job.costEstimateUSD, actualCostUSD: job.actualCostUSD, computeSeconds: job.computeSeconds });
 
   if (job.status === "done" || job.status === "error" || job.status === "canceled") {
     send({ type: "end", status: job.status });

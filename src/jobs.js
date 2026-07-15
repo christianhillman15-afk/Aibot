@@ -68,6 +68,7 @@ export function listJobs() {
         return {
           id: j.id, mode: j.mode, status: j.status, step: j.step,
           outputs: j.outputs, error: j.error, costEstimateUSD: j.costEstimateUSD,
+          actualCostUSD: j.actualCostUSD, computeSeconds: j.computeSeconds,
           createdAt: j.createdAt, updatedAt: j.updatedAt,
           title: jobTitle(j),
         };
