@@ -1,0 +1,14 @@
+services:
+  aibot:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./workspace:/app/workspace
+    # The AI's bash tool runs inside this container — the container is its
+    # sandbox. Keep resource limits so a runaway command can't take the droplet down.
+    mem_limit: 1g
+    cpus: 1.0
