@@ -1,0 +1,14 @@
+services:
+  video-studio:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    # Generation runs on Replicate; this container only orchestrates + assembles
+    # with ffmpeg, so it stays light. Bump cpus if explainer assembly feels slow.
+    mem_limit: 2g
+    cpus: 2.0
