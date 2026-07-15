@@ -17,12 +17,13 @@ echo "==> Configuring .env..."
 if [ ! -f .env ]; then
   cp .env.example .env
   TOKEN=$(openssl rand -hex 24)
-  sed -i "s/^AUTH_TOKEN=.*/AUTH_TOKEN=${TOKEN}/" .env
+  # Use a non-/ delimiter so tokens containing slashes don't break sed.
+  sed -i "s|^AUTH_TOKEN=.*|AUTH_TOKEN=${TOKEN}|" .env
   if [ -t 0 ]; then
-    read -rp "Paste your Anthropic API key (sk-ant-...): " KEY
-    sed -i "s/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=${KEY}/" .env
+    read -rp "Paste your Replicate API token (r8_...): " KEY
+    sed -i "s|^REPLICATE_API_TOKEN=.*|REPLICATE_API_TOKEN=${KEY}|" .env
   else
-    echo "No TTY — edit .env and set ANTHROPIC_API_KEY manually, then re-run: docker compose up -d --build"
+    echo "No TTY — edit .env and set REPLICATE_API_TOKEN manually, then: docker compose up -d --build"
   fi
   chmod 600 .env
   echo "Generated web UI access token: ${TOKEN}"
@@ -43,7 +44,7 @@ docker compose up -d --build
 IP=$(curl -fsS -4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo
 echo "======================================================================"
-echo "  Aibot is running:  http://${IP}:8080"
+echo "  Video Studio is running:  http://${IP}:8080"
 echo "  Log in with the AUTH_TOKEN stored in $(pwd)/.env"
 echo "  Logs:    docker compose logs -f"
 echo "  Update:  git pull && docker compose up -d --build"

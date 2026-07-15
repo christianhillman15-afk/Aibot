@@ -2,50 +2,42 @@ import "dotenv/config";
 import express from "express";
 import crypto from "node:crypto";
 import path from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
+import { EventEmitter } from "node:events";
 
-import { config, ensureDirs, VALID_EFFORTS, PRICES, ROOT_DIR } from "./src/config.js";
-import { runAgentTurn } from "./src/agent.js";
-import {
-  createConversation,
-  loadConversation,
-  saveConversation,
-  deleteConversation,
-  listConversations,
-} from "./src/store.js";
+import { config, ensureDirs, MODES, COST_ESTIMATE_USD, tierCostMult, ROOT_DIR } from "./src/config.js";
+import { createJob, loadJob, saveJob, listJobs, deleteJob } from "./src/jobs.js";
+import { runJob } from "./src/pipeline.js";
+import { hasFfmpeg } from "./src/ffmpeg.js";
+import { presetPayload } from "./src/presets.js";
 
-// ---------------------------------------------------------------------------
-// Startup checks
-// ---------------------------------------------------------------------------
 ensureDirs();
 
 if (!config.authToken && !config.allowNoAuth) {
   console.error(
-    "FATAL: AUTH_TOKEN is not set. This server executes shell commands on behalf of the AI —\n" +
-      "it must not run unauthenticated. Set AUTH_TOKEN in .env (e.g. `openssl rand -hex 24`),\n" +
-      "or set ALLOW_NO_AUTH=1 only if the port is firewalled to localhost."
+    "FATAL: AUTH_TOKEN is not set. This server spends money generating videos on your\n" +
+      "Replicate account — it must not run unauthenticated. Set AUTH_TOKEN in .env\n" +
+      "(e.g. `openssl rand -hex 24`), or set ALLOW_NO_AUTH=1 only if the port is firewalled."
   );
   process.exit(1);
 }
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn("WARNING: ANTHROPIC_API_KEY is not set — chat requests will fail until it is.");
+if (!config.replicateToken) {
+  console.warn("WARNING: REPLICATE_API_TOKEN is not set — generation will fail until it is.");
 }
 
-const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
-const busy = new Set(); // conversation ids with an in-flight turn
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: `${config.bodyLimitMb}mb` }));
 app.use(express.static(path.join(ROOT_DIR, "public")));
+// Generated media. Served without the /api auth gate so <video> tags load
+// directly; access relies on the unguessable 16-hex job id in the path. Put the
+// app behind HTTPS + a reverse proxy if you need true access control on outputs.
+app.use("/outputs", express.static(config.outputDir));
 
-// ---------------------------------------------------------------------------
-// Auth — constant-time bearer-token check on all /api routes
-// ---------------------------------------------------------------------------
+// ---- auth ----
 function tokenMatches(provided) {
   const a = Buffer.from(String(provided ?? ""));
   const b = Buffer.from(config.authToken);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-
 app.use("/api", (req, res, next) => {
   if (!config.authToken && config.allowNoAuth) return next();
   const header = req.headers.authorization || "";
@@ -54,79 +46,123 @@ app.use("/api", (req, res, next) => {
   res.status(401).json({ error: "Unauthorized" });
 });
 
-// ---------------------------------------------------------------------------
-// REST endpoints
-// ---------------------------------------------------------------------------
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, model: config.model, fallbacks: config.fallbacksEnabled });
-});
+// ---- job runner: small queue + per-job event bus + cancellation ----
+const active = new Map(); // jobId -> AbortController
+const buses = new Map(); // jobId -> EventEmitter
+const queue = []; // jobIds waiting for a slot
 
-app.get("/api/conversations", (_req, res) => {
-  res.json(listConversations());
-});
+function busFor(id) {
+  let b = buses.get(id);
+  if (!b) { b = new EventEmitter(); b.setMaxListeners(0); buses.set(id, b); }
+  return b;
+}
 
-app.get("/api/conversations/:id", (req, res) => {
-  try {
-    const conv = loadConversation(req.params.id);
-    if (!conv) return res.status(404).json({ error: "Not found" });
-    res.json(conv);
-  } catch {
-    res.status(400).json({ error: "Invalid id" });
+function pump() {
+  while (active.size < config.maxConcurrentJobs && queue.length > 0) {
+    const id = queue.shift();
+    const job = loadJob(id);
+    if (!job || job.status !== "queued") continue;
+    start(job);
   }
-});
+}
 
-app.delete("/api/conversations/:id", (req, res) => {
-  try {
-    // Refuse to delete while a turn is running — the in-flight turn saves the
-    // conversation on completion and would resurrect a file deleted mid-turn.
-    if (busy.has(req.params.id)) {
-      return res.status(409).json({ error: "Conversation has a turn in progress; try again in a moment." });
+function start(job) {
+  const ac = new AbortController();
+  active.set(job.id, ac);
+  const bus = busFor(job.id);
+  runJob(job, {
+    signal: ac.signal,
+    onProgress: (evt) => bus.emit("evt", evt),
+  }).finally(() => {
+    active.delete(job.id);
+    bus.emit("evt", { type: "end", status: loadJob(job.id)?.status });
+    pump();
+  });
+}
+
+// ---- upfront cost estimate (ballpark) ----
+function estimateCost(mode, params) {
+  const c = COST_ESTIMATE_USD;
+  const mult = tierCostMult(params.tier || config.defaultTier);
+  if (mode === "clip" || mode === "short") return (params.image ? c.imageToVideo : c.textToVideo) * mult;
+  if (mode === "avatar") return c.avatar + (params.narration ? c.tts : 0);
+  if (mode === "explainer") return (params.scenes?.length || 0) * (c.textToVideo * mult + c.tts);
+  return 0;
+}
+
+function validate(mode, params) {
+  if (!MODES.includes(mode)) return "Unknown mode.";
+  if (mode === "clip" || mode === "short") {
+    if (!params.prompt && !params.image) return "Provide a prompt or a reference image.";
+  } else if (mode === "avatar") {
+    if (!params.image) return "Upload a portrait image.";
+    if (!params.narration && !params.audio && !params.audioUrl) return "Provide narration text or an audio upload.";
+  } else if (mode === "explainer") {
+    if (!Array.isArray(params.scenes) || params.scenes.length === 0) return "Add at least one scene.";
+    for (const [i, s] of params.scenes.entries()) {
+      if (!s || !s.narration || !s.visualPrompt) return `Scene ${i + 1} needs both narration and a visual prompt.`;
     }
-    deleteConversation(req.params.id);
-    res.json({ ok: true });
-  } catch {
-    res.status(400).json({ error: "Invalid id" });
   }
+  return null;
+}
+
+// ---- REST ----
+app.get("/api/health", async (_req, res) => {
+  res.json({
+    ok: true,
+    models: config.models,
+    tiers: Object.fromEntries(Object.entries(config.tiers).map(([k, v]) => [k, { label: v.label, costMult: v.costMult }])),
+    defaultTier: config.defaultTier,
+    ffmpeg: await hasFfmpeg(),
+    replicateConfigured: Boolean(config.replicateToken),
+  });
 });
 
-// ---------------------------------------------------------------------------
-// Chat endpoint — Server-Sent Events stream
-// ---------------------------------------------------------------------------
-function sse(res, event, data) {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
+app.get("/api/presets", (_req, res) => res.json(presetPayload()));
 
-function approxCost(usage) {
-  const [inP, outP] = PRICES[config.model] || PRICES["claude-fable-5"];
-  // Cache reads are ~0.1x input price; cache writes ~1.25x. Approximate.
-  const dollars =
-    (usage.input * inP + usage.cacheWrite * inP * 1.25 + usage.cacheRead * inP * 0.1 + usage.output * outP) / 1e6;
-  return Math.round(dollars * 10000) / 10000;
-}
+app.get("/api/jobs", (_req, res) => res.json(listJobs()));
 
-app.post("/api/chat", async (req, res) => {
-  const { conversationId, message, mode: rawMode, effort: rawEffort } = req.body || {};
-  if (!message || typeof message !== "string" || !message.trim()) {
-    return res.status(400).json({ error: "'message' is required" });
-  }
-  const mode = rawMode === "ultra" ? "ultra" : "standard";
-  const defaultEffort = mode === "ultra" ? config.ultraEffort : config.defaultEffort;
-  const effort = VALID_EFFORTS.includes(rawEffort) ? rawEffort : defaultEffort;
-
-  let conv;
+app.get("/api/jobs/:id", (req, res) => {
   try {
-    conv = conversationId ? loadConversation(conversationId) : null;
-  } catch {
-    return res.status(400).json({ error: "Invalid conversation id" });
-  }
-  if (conversationId && !conv) return res.status(404).json({ error: "Conversation not found" });
-  if (!conv) {
-    conv = createConversation({ mode, title: message.trim().slice(0, 60) });
-  }
-  if (busy.has(conv.id)) {
-    return res.status(409).json({ error: "A turn is already running in this conversation" });
-  }
-  busy.add(conv.id);
+    const job = loadJob(req.params.id);
+    if (!job) return res.status(404).json({ error: "Not found" });
+    res.json(job);
+  } catch { res.status(400).json({ error: "Invalid id" }); }
+});
+
+app.post("/api/jobs/:id/cancel", (req, res) => {
+  const ac = active.get(req.params.id);
+  if (ac) { ac.abort(); return res.json({ ok: true, canceled: true }); }
+  res.status(409).json({ error: "Job is not running" });
+});
+
+app.delete("/api/jobs/:id", (req, res) => {
+  try {
+    if (active.has(req.params.id)) return res.status(409).json({ error: "Job is running — cancel it first." });
+    deleteJob(req.params.id);
+    res.json({ ok: true });
+  } catch { res.status(400).json({ error: "Invalid id" }); }
+});
+
+app.post("/api/generate", (req, res) => {
+  const { mode, params } = req.body || {};
+  const err = validate(mode, params || {});
+  if (err) return res.status(400).json({ error: err });
+
+  const job = createJob({ mode, params });
+  job.costEstimateUSD = 0;
+  saveJob(job);
+  const upfront = estimateCost(mode, params);
+
+  queue.push(job.id);
+  pump();
+  res.json({ jobId: job.id, estimateUSD: Math.round(upfront * 1000) / 1000 });
+});
+
+// ---- SSE progress stream ----
+app.get("/api/jobs/:id/stream", (req, res) => {
+  const job = loadJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Not found" });
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -134,60 +170,28 @@ app.post("/api/chat", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
-  let aborted = false;
-  const abortController = new AbortController();
-  res.on("close", () => {
-    aborted = true;
-    abortController.abort();
-  });
-  const heartbeat = setInterval(() => {
-    if (!aborted) res.write(": keepalive\n\n");
-  }, 15000);
+  const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  // Replay current state so a late subscriber isn't stuck waiting.
+  send({ type: "state", status: job.status, step: job.step, progress: job.progress, outputs: job.outputs, error: job.error, costEstimateUSD: job.costEstimateUSD });
 
-  sse(res, "meta", { conversationId: conv.id, mode, effort, model: config.model });
-
-  conv.messages.push({ role: "user", content: [{ type: "text", text: message }] });
-
-  try {
-    const { usage } = await runAgentTurn(client, {
-      messages: conv.messages,
-      mode,
-      effort,
-      emit: (e) => {
-        if (!aborted) sse(res, e.type, e);
-      },
-      isAborted: () => aborted,
-      signal: abortController.signal,
-    });
-    saveConversation(conv);
-    if (!aborted) {
-      sse(res, "done", { usage, approxCostUSD: approxCost(usage) });
-    }
-  } catch (err) {
-    // Persist what we have so the conversation isn't lost on errors.
-    try { saveConversation(conv); } catch { /* best effort */ }
-    let text = String(err?.message || err);
-    if (err instanceof Anthropic.AuthenticationError) {
-      text = "Anthropic API key is invalid or missing. Set ANTHROPIC_API_KEY in .env and restart.";
-    } else if (err instanceof Anthropic.RateLimitError) {
-      text = "Anthropic API rate limit hit. Wait a bit and retry.";
-    } else if (err instanceof Anthropic.BadRequestError && config.model === "claude-fable-5") {
-      text +=
-        "\nNote: claude-fable-5 requires the API organization to have 30-day data retention " +
-        "(it is unavailable under zero-data-retention). If every request fails with a 400, check that setting, " +
-        "or set MODEL=claude-opus-4-8 in .env.";
-    }
-    console.error("chat error:", err);
-    if (!aborted) sse(res, "error", { text });
-  } finally {
-    clearInterval(heartbeat);
-    busy.delete(conv.id);
-    if (!aborted) res.end();
+  if (job.status === "done" || job.status === "error" || job.status === "canceled") {
+    send({ type: "end", status: job.status });
+    return res.end();
   }
+
+  const bus = busFor(job.id);
+  const onEvt = (evt) => {
+    send(evt);
+    if (evt.type === "end") { cleanup(); res.end(); }
+  };
+  const heartbeat = setInterval(() => res.write(": keepalive\n\n"), 15000);
+  function cleanup() { clearInterval(heartbeat); bus.off("evt", onEvt); }
+  bus.on("evt", onEvt);
+  req.on("close", cleanup);
 });
 
 app.listen(config.port, () => {
-  console.log(`aibot listening on http://0.0.0.0:${config.port}`);
-  console.log(`model=${config.model} fallbacks=${config.fallbacksEnabled ? config.fallbackModel : "off"}`);
-  if (!config.authToken) console.warn("AUTH DISABLED (ALLOW_NO_AUTH=1) — make sure the port is not public!");
+  console.log(`video-studio listening on http://0.0.0.0:${config.port}`);
+  console.log(`models: ${JSON.stringify(config.models)}`);
+  if (!config.authToken) console.warn("AUTH DISABLED (ALLOW_NO_AUTH=1) — do not expose this port publicly!");
 });

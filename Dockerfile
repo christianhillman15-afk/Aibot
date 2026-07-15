@@ -1,8 +1,9 @@
 FROM node:22-bookworm-slim
 
-# Tools available to the AI's bash tool inside the container sandbox.
+# ffmpeg + ffprobe assemble explainer videos and burn captions;
+# the DejaVu font is what ffmpeg's drawtext uses for burned-in captions.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash git curl ca-certificates jq python3 ripgrep openssl \
+    ffmpeg fonts-dejavu-core ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

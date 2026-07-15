@@ -9,41 +9,92 @@ function bool(v, fallback = false) {
   if (v === undefined || v === "") return fallback;
   return ["1", "true", "yes", "on"].includes(String(v).toLowerCase());
 }
+const str = (v, d) => (v === undefined || v === "" ? d : String(v));
+const num = (v, d) => (v === undefined || v === "" ? d : Number(v));
 
 export const config = {
-  port: Number(process.env.PORT || 8080),
+  port: num(process.env.PORT, 8080),
   authToken: process.env.AUTH_TOKEN || "",
   allowNoAuth: bool(process.env.ALLOW_NO_AUTH, false),
 
-  model: process.env.MODEL || "claude-fable-5",
-  fallbackModel: process.env.FALLBACK_MODEL || "claude-opus-4-8",
-  // Server-side refusal fallbacks are an Anthropic beta; only meaningful on Fable 5.
-  fallbacksEnabled: bool(process.env.FALLBACKS, true),
+  // Video/audio generation runs on Replicate (one key, many models).
+  replicateToken: process.env.REPLICATE_API_TOKEN || "",
+  replicateBase: str(process.env.REPLICATE_BASE_URL, "https://api.replicate.com/v1"),
 
-  defaultEffort: process.env.DEFAULT_EFFORT || "high",
-  ultraEffort: process.env.ULTRA_EFFORT || "xhigh",
-  subagentEffort: process.env.SUBAGENT_EFFORT || "medium",
+  // Model slugs per role. These are the "best cheap" defaults (cost-sensitive);
+  // swap any of them for a premium model in .env — see README for the menu.
+  // Verified as live Replicate slugs (July 2026); if one is retired, the app
+  // surfaces Replicate's error verbatim so you can update the slug here.
+  models: {
+    textToVideo: str(process.env.MODEL_T2V, "wan-video/wan-2.5-t2v"),
+    imageToVideo: str(process.env.MODEL_I2V, "wan-video/wan-2.5-i2v"),
+    tts: str(process.env.MODEL_TTS, "jaaari/kokoro-82m"),
+    avatar: str(process.env.MODEL_AVATAR, "bytedance/omni-human"),
+    lipsync: str(process.env.MODEL_LIPSYNC, "sync/lipsync-2"),
+  },
 
-  maxTokens: Number(process.env.MAX_TOKENS || 64000),
-  subagentMaxTokens: Number(process.env.SUBAGENT_MAX_TOKENS || 32000),
-  maxToolLoops: Number(process.env.MAX_TOOL_LOOPS || 60),
-  maxSubagents: Number(process.env.MAX_SUBAGENTS || 6),
-  bashTimeoutMs: Number(process.env.BASH_TIMEOUT_MS || 180000),
-  maxToolResultChars: Number(process.env.MAX_TOOL_RESULT_CHARS || 30000),
+  // Quality tiers = the cost lever. Draft is the cost-efficient default: fast,
+  // cheap model variants. Premium swaps in flagship models (better motion +
+  // native audio) at several times the price. Each is configurable in .env.
+  tiers: {
+    draft: {
+      label: "Draft — cheapest & fast",
+      textToVideo: str(process.env.MODEL_T2V_DRAFT, "wan-video/wan-2.5-t2v-fast"),
+      imageToVideo: str(process.env.MODEL_I2V_DRAFT, "wan-video/wan-2.5-i2v-fast"),
+      costMult: num(process.env.TIER_DRAFT_MULT, 0.5),
+    },
+    standard: {
+      label: "Standard — balanced",
+      textToVideo: str(process.env.MODEL_T2V, "wan-video/wan-2.5-t2v"),
+      imageToVideo: str(process.env.MODEL_I2V, "wan-video/wan-2.5-i2v"),
+      costMult: 1,
+    },
+    premium: {
+      label: "Premium — flagship quality",
+      textToVideo: str(process.env.MODEL_T2V_PREMIUM, "kwaivgi/kling-v3-video"),
+      imageToVideo: str(process.env.MODEL_I2V_PREMIUM, "kwaivgi/kling-v3-video"),
+      costMult: num(process.env.TIER_PREMIUM_MULT, 4),
+    },
+  },
+  defaultTier: str(process.env.DEFAULT_TIER, "draft"),
 
-  dataDir: path.resolve(ROOT_DIR, process.env.DATA_DIR || "data"),
-  workspaceDir: path.resolve(ROOT_DIR, process.env.WORKSPACE_DIR || "workspace"),
+  ttsVoice: str(process.env.TTS_VOICE, "af_heart"),
+
+  pollIntervalMs: num(process.env.POLL_INTERVAL_MS, 3000),
+  pollTimeoutMs: num(process.env.POLL_TIMEOUT_MS, 15 * 60 * 1000),
+  maxConcurrentJobs: num(process.env.MAX_CONCURRENT_JOBS, 2),
+  maxScenes: num(process.env.MAX_SCENES, 8),
+  bodyLimitMb: num(process.env.BODY_LIMIT_MB, 60),
+
+  dataDir: path.resolve(ROOT_DIR, str(process.env.DATA_DIR, "data")),
+  outputDir: path.resolve(ROOT_DIR, str(process.env.OUTPUT_DIR, "outputs")),
 };
 
-export const VALID_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// Rough per-generation cost ESTIMATES in USD, purely for the UI readout.
+// Replicate bills by compute-seconds per model, which varies with duration and
+// hardware — treat these as ballpark, not invoices. Edit to match your models.
+export const COST_ESTIMATE_USD = {
+  textToVideo: num(process.env.COST_T2V, 0.25),
+  imageToVideo: num(process.env.COST_I2V, 0.25),
+  tts: num(process.env.COST_TTS, 0.02),
+  avatar: num(process.env.COST_AVATAR, 0.5),
+  lipsync: num(process.env.COST_LIPSYNC, 0.4),
+};
 
-export function ensureDirs() {
-  fs.mkdirSync(path.join(config.dataDir, "conversations"), { recursive: true });
-  fs.mkdirSync(config.workspaceDir, { recursive: true });
+export const MODES = ["clip", "short", "explainer", "avatar"];
+
+export function tierFor(name) {
+  return config.tiers[name] || config.tiers[config.defaultTier] || config.tiers.standard;
+}
+export function modelForTier(name, kind) {
+  const t = tierFor(name);
+  return kind === "i2v" ? t.imageToVideo : t.textToVideo;
+}
+export function tierCostMult(name) {
+  return tierFor(name).costMult ?? 1;
 }
 
-// Rough $/MTok input,output — used only for the approximate cost readout in the UI.
-export const PRICES = {
-  "claude-fable-5": [10, 50],
-  "claude-opus-4-8": [5, 25],
-};
+export function ensureDirs() {
+  fs.mkdirSync(path.join(config.dataDir, "jobs"), { recursive: true });
+  fs.mkdirSync(config.outputDir, { recursive: true });
+}

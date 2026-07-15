@@ -1,7 +1,7 @@
 {
-  "name": "aibot",
+  "name": "video-studio",
   "version": "1.0.0",
-  "description": "Self-hosted personal AI assistant powered by Claude Fable 5, with multi-agent Ultra mode. Deploys to a DigitalOcean droplet.",
+  "description": "Self-hosted professional video generator — cinematic clips, social shorts, explainer/ad videos, and talking avatars. Generates via Replicate; deploys to a droplet.",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -11,7 +11,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.111.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.2"
   }

@@ -3,422 +3,428 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aibot — Personal AI</title>
+<title>Video Studio</title>
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --panel2: #1e2229; --border: #2a2f3a;
-    --text: #e6e8ee; --dim: #9aa3b2; --accent: #d97a4a; --accent2: #7aa2f7;
-    --ok: #7fc98a; --bad: #e06c75;
+    --bg:#0d0f14; --panel:#141821; --panel2:#1b2029; --border:#2a2f3a;
+    --text:#e8eaf0; --dim:#98a2b3; --accent:#8b5cf6; --accent2:#22d3ee;
+    --ok:#4ade80; --bad:#f87171; --warn:#fbbf24;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  header.top{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--border);background:var(--panel)}
+  header.top h1{font-size:17px;margin:0;font-weight:800;letter-spacing:.3px}
+  header.top h1 .g{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  header.top .status{margin-left:auto;font-size:12px;color:var(--dim)}
+  header.top .status b{color:var(--ok)}
+  header.top .status b.bad{color:var(--bad)}
+  #logout{color:var(--dim);cursor:pointer;text-decoration:underline;font-size:12px}
 
-  #sidebar { width: 260px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-  #sidebar header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 700; letter-spacing: .5px; }
-  #sidebar header .dot { color: var(--accent); }
-  #newChat { margin: 12px; padding: 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); cursor: pointer; font-size: 14px; }
-  #newChat:hover { border-color: var(--accent); }
-  #convList { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
-  .convItem { padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
-  .convItem:hover { background: var(--panel2); color: var(--text); }
-  .convItem.active { background: var(--panel2); color: var(--text); }
-  .convItem .del { margin-left: auto; opacity: 0; font-size: 12px; }
-  .convItem:hover .del { opacity: .7; }
-  #sidebar footer { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--dim); }
-  #sidebar footer a { color: var(--dim); cursor: pointer; text-decoration: underline; }
+  .wrap{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:0;min-height:calc(100vh - 55px)}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .studio{padding:22px;overflow-y:auto}
+  .gallery{border-left:1px solid var(--border);background:var(--panel);padding:16px;overflow-y:auto}
 
-  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #messages { flex: 1; overflow-y: auto; padding: 24px 0 12px; }
-  .msg { max-width: 820px; margin: 0 auto 18px; padding: 0 20px; }
-  .msg .who { font-size: 12px; color: var(--dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .8px; }
-  .msg.user .body { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; white-space: pre-wrap; word-wrap: break-word; }
-  .msg.assistant .body { white-space: pre-wrap; word-wrap: break-word; }
-  .msg .body pre { background: #12141a; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; font-size: 13px; }
-  .thinking { color: var(--dim); font-size: 13px; border-left: 3px solid var(--border); padding: 4px 10px; margin: 6px 0; white-space: pre-wrap; display: none; }
-  .thinking.open { display: block; }
-  .thinkToggle { font-size: 12px; color: var(--accent2); cursor: pointer; user-select: none; margin: 4px 0; display: inline-block; }
-  .chip { display: inline-block; font-size: 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; margin: 3px 4px 3px 0; color: var(--dim); }
-  .chip.ok { border-color: #2e4436; }
-  .chip.bad { border-color: #59323a; color: var(--bad); }
-  .chip.agent { border-color: #3a3560; color: var(--accent2); }
-  .notice { color: var(--accent); font-size: 13px; margin: 6px 0; }
-  .errorBox { color: var(--bad); font-size: 13px; margin: 6px 0; white-space: pre-wrap; }
-  .usage { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+  .tab{padding:8px 14px;border-radius:9px;border:1px solid var(--border);background:var(--panel2);color:var(--dim);cursor:pointer;font-size:14px;font-weight:600}
+  .tab.active{color:var(--text);border-color:var(--accent);background:linear-gradient(180deg,rgba(139,92,246,.18),transparent)}
+  .tab .sub{display:block;font-size:11px;font-weight:400;color:var(--dim)}
 
-  #composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 20px 16px; }
-  #composerInner { max-width: 820px; margin: 0 auto; }
-  #controls { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; font-size: 13px; color: var(--dim); flex-wrap: wrap; }
-  select { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px; }
-  #ultraWarn { color: var(--accent); display: none; }
-  #inputRow { display: flex; gap: 10px; }
-  textarea { flex: 1; resize: none; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font: inherit; min-height: 48px; max-height: 200px; }
-  textarea:focus { outline: none; border-color: var(--accent); }
-  #send { padding: 0 22px; border-radius: 10px; border: none; background: var(--accent); color: #16110c; font-weight: 700; cursor: pointer; font-size: 14px; }
-  #send:disabled { opacity: .5; cursor: default; }
+  .form{max-width:720px}
+  label{display:block;font-size:13px;color:var(--dim);margin:14px 0 5px}
+  input[type=text],textarea,select{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:10px 12px;font:inherit}
+  textarea{resize:vertical;min-height:70px}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:150px}
+  .drop{border:1px dashed var(--border);border-radius:9px;padding:14px;text-align:center;color:var(--dim);cursor:pointer;font-size:13px}
+  .drop.has{border-color:var(--accent);color:var(--text)}
+  .drop img,.drop audio{max-width:100%;max-height:130px;margin-top:8px;border-radius:6px;display:block;margin-left:auto;margin-right:auto}
+  .hint{font-size:12px;color:var(--dim);margin-top:4px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip-p{padding:6px 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel2);color:var(--dim);cursor:pointer;font-size:12px;user-select:none}
+  .chip-p:hover{color:var(--text)}
+  .chip-p.on{color:var(--text);border-color:var(--accent);background:linear-gradient(180deg,rgba(139,92,246,.22),transparent)}
+  details{margin-top:14px;border:1px solid var(--border);border-radius:9px;padding:8px 12px}
+  details summary{cursor:pointer;font-size:13px;color:var(--dim)}
 
-  #login { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
-  #loginBox { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 360px; }
-  #loginBox h1 { font-size: 18px; margin: 0 0 6px; }
-  #loginBox p { color: var(--dim); font-size: 13px; margin: 0 0 16px; }
-  #loginBox input { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font: inherit; margin-bottom: 12px; }
-  #loginBox button { width: 100%; padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: #16110c; font-weight: 700; cursor: pointer; }
-  #loginErr { color: var(--bad); font-size: 13px; min-height: 18px; }
+  .scene{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;position:relative;background:var(--panel2)}
+  .scene .rm{position:absolute;top:8px;right:10px;color:var(--dim);cursor:pointer;font-size:13px}
+  .scene h4{margin:0 0 4px;font-size:13px;color:var(--accent2)}
+
+  .go{margin-top:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  button.primary{padding:11px 26px;border-radius:10px;border:none;background:linear-gradient(90deg,var(--accent),var(--accent2));color:#0b0d12;font-weight:800;cursor:pointer;font-size:15px}
+  button.primary:disabled{opacity:.5;cursor:default}
+  button.ghost{padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);cursor:pointer;font-size:13px}
+  .est{font-size:13px;color:var(--warn)}
+
+  .live{margin-top:18px;border:1px solid var(--border);border-radius:10px;padding:14px;display:none}
+  .live.show{display:block}
+  .live .bar{height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;margin:8px 0}
+  .live .bar i{display:block;height:100%;width:30%;background:linear-gradient(90deg,var(--accent),var(--accent2));animation:slide 1.4s ease-in-out infinite}
+  @keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
+  .live .step{font-size:14px}
+  .live .log{font-size:12px;color:var(--dim);max-height:120px;overflow-y:auto;margin-top:8px;white-space:pre-wrap}
+  .live video{width:100%;border-radius:8px;margin-top:10px}
+
+  .card{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px;background:var(--panel2)}
+  .card video{width:100%;display:block;background:#000}
+  .card .meta{padding:8px 10px;font-size:12px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .card .meta .m-mode{color:var(--accent2);text-transform:uppercase;font-weight:700;font-size:11px}
+  .card .meta .m-act{margin-left:auto;display:flex;gap:8px}
+  .card .meta a,.card .meta span.del{color:var(--dim);cursor:pointer;text-decoration:underline}
+  .card .title{padding:0 10px 8px;font-size:13px}
+  .badge{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--border)}
+  .badge.running{color:var(--warn);border-color:#4a3f1f}
+  .badge.error{color:var(--bad);border-color:#5a2b2b}
+  .badge.done{color:var(--ok);border-color:#255536}
+  .empty{color:var(--dim);font-size:13px;text-align:center;margin-top:30px}
+
+  #login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:20}
+  #loginBox{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:30px;width:370px}
+  #loginBox h1{margin:0 0 6px;font-size:19px}
+  #loginBox p{color:var(--dim);font-size:13px;margin:0 0 16px}
+  #loginBox input{margin-bottom:12px}
+  #loginBox button{width:100%;padding:11px;border-radius:9px;border:none;background:linear-gradient(90deg,var(--accent),var(--accent2));color:#0b0d12;font-weight:800;cursor:pointer}
+  #loginErr{color:var(--bad);font-size:13px;min-height:18px}
 </style>
 </head>
 <body>
 
 <div id="login" style="display:none">
   <div id="loginBox">
-    <h1>Aibot <span style="color:var(--accent)">●</span></h1>
-    <p>Enter the access token from your server's <code>.env</code> file (AUTH_TOKEN).</p>
+    <h1>Video Studio <span style="color:var(--accent)">●</span></h1>
+    <p>Enter the access token from your server's <code>.env</code> (AUTH_TOKEN).</p>
     <input id="tokenInput" type="password" placeholder="Access token" autocomplete="current-password">
     <div id="loginErr"></div>
     <button id="loginBtn">Unlock</button>
   </div>
 </div>
 
-<div id="sidebar">
-  <header>Aibot <span class="dot">●</span> <span style="font-weight:400;color:var(--dim);font-size:12px" id="modelLabel"></span></header>
-  <button id="newChat">+ New chat</button>
-  <div id="convList"></div>
-  <footer><a id="logout">Log out</a></footer>
-</div>
+<header class="top">
+  <h1><span class="g">Video Studio</span></h1>
+  <div class="status" id="status"></div>
+  <span id="logout">log out</span>
+</header>
 
-<div id="main">
-  <div id="messages"></div>
-  <div id="composer">
-    <div id="composerInner">
-      <div id="controls">
-        <label>Mode
-          <select id="mode">
-            <option value="standard">Standard</option>
-            <option value="ultra">Ultracode (multi-agent)</option>
-          </select>
-        </label>
-        <label>Effort
-          <select id="effort">
-            <option value="">auto</option>
-            <option>low</option><option>medium</option><option>high</option>
-            <option>xhigh</option><option>max</option>
-          </select>
-        </label>
-        <span id="ultraWarn">⚠ Ultra mode spawns parallel agents — expect significantly higher token costs.</span>
-      </div>
-      <div id="inputRow">
-        <textarea id="input" placeholder="Message your AI… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button id="send">Send</button>
-      </div>
+<div class="wrap">
+  <div class="studio">
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-mode="clip">Cinematic clip<span class="sub">text / image → video</span></div>
+      <div class="tab" data-mode="short">Social short<span class="sub">9:16 + caption</span></div>
+      <div class="tab" data-mode="explainer">Explainer / ad<span class="sub">script → narrated video</span></div>
+      <div class="tab" data-mode="avatar">Talking avatar<span class="sub">photo + voice → UGC</span></div>
     </div>
+
+    <div class="form" id="form"></div>
+
+    <div class="go">
+      <button class="primary" id="generate">Generate</button>
+      <span class="est" id="est"></span>
+    </div>
+
+    <div class="live" id="live">
+      <div class="step" id="liveStep">Working…</div>
+      <div class="bar"><i></i></div>
+      <div class="log" id="liveLog"></div>
+      <div id="liveOut"></div>
+      <button class="ghost" id="cancelBtn" style="margin-top:10px">Cancel</button>
+    </div>
+  </div>
+
+  <div class="gallery">
+    <div style="display:flex;align-items:center;margin-bottom:12px">
+      <strong style="font-size:14px">Library</strong>
+      <button class="ghost" id="refresh" style="margin-left:auto">Refresh</button>
+    </div>
+    <div id="jobs"><div class="empty">No videos yet.</div></div>
   </div>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let token = localStorage.getItem("aibot_token") || "";
-let currentConv = null;
-let streaming = false;
+let token = localStorage.getItem("vs_token") || "";
+let mode = "clip";
+let uploads = {}; // field -> dataURI
+let currentStream = null, currentJobId = null;
+let presets = { cameraMotions: [], styles: [] };
+let tiers = {}, defaultTier = "draft";
+let sel = { motion: "none", style: "none", tier: "draft" };
 
-// ---------- auth ----------
-function headers(json) {
-  const h = { "Authorization": "Bearer " + token };
-  if (json) h["Content-Type"] = "application/json";
-  return h;
-}
-async function checkAuth() {
-  try {
-    const r = await fetch("/api/health", { headers: headers() });
-    if (r.status === 401) return false;
-    const j = await r.json();
-    $("modelLabel").textContent = j.model || "";
+function headers(json){const h={Authorization:"Bearer "+token};if(json)h["Content-Type"]="application/json";return h;}
+async function checkAuth(){
+  try{const r=await fetch("/api/health",{headers:headers()});if(r.status===401)return false;
+    const j=await r.json();
+    tiers=j.tiers||{}; defaultTier=j.defaultTier||"draft"; sel.tier=defaultTier;
+    $("status").innerHTML = "Replicate: <b class='"+(j.replicateConfigured?"":"bad")+"'>"+(j.replicateConfigured?"ready":"no key")+"</b> · ffmpeg: <b class='"+(j.ffmpeg?"":"bad")+"'>"+(j.ffmpeg?"ok":"missing")+"</b>";
     return true;
-  } catch { return false; }
+  }catch{return false;}
 }
-function showLogin(msg) {
-  $("login").style.display = "flex";
-  $("loginErr").textContent = msg || "";
-  $("tokenInput").focus();
-}
-$("loginBtn").onclick = async () => {
-  token = $("tokenInput").value.trim();
-  if (await checkAuth()) {
-    localStorage.setItem("aibot_token", token);
-    $("login").style.display = "none";
-    refreshConvList();
-  } else {
-    showLogin("Invalid token — check AUTH_TOKEN in the server's .env");
-  }
-};
-$("tokenInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
-$("logout").onclick = () => { localStorage.removeItem("aibot_token"); location.reload(); };
+function showLogin(msg){$("login").style.display="flex";$("loginErr").textContent=msg||"";$("tokenInput").focus();}
+$("loginBtn").onclick=async()=>{token=$("tokenInput").value.trim();
+  if(await checkAuth()){localStorage.setItem("vs_token",token);$("login").style.display="none";await loadPresets();renderForm();refreshJobs();}
+  else showLogin("Invalid token — check AUTH_TOKEN in the server's .env");};
+$("tokenInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("loginBtn").click();});
+$("logout").onclick=()=>{localStorage.removeItem("vs_token");location.reload();};
 
-// ---------- rendering ----------
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// ---------- forms per mode ----------
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+const ARO='<option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option>';
+const ARV='<option>9:16</option><option>16:9</option><option>1:1</option>';
+
+function dropField(field,accept,label){
+  return `<div class="drop" data-drop="${field}">${label}
+    <input type="file" accept="${accept}" style="display:none" data-file="${field}"></div>`;
 }
-function renderRich(el, text) {
-  // minimal markdown: fenced code blocks + inline code; everything else pre-wrap text
-  const parts = text.split(/```/);
-  let html = "";
-  parts.forEach((part, i) => {
-    if (i % 2 === 1) {
-      const body = part.replace(/^[a-zA-Z0-9_+-]*\n/, "");
-      html += "<pre>" + escapeHtml(body) + "</pre>";
-    } else {
-      html += escapeHtml(part).replace(/`([^`\n]+)`/g, "<code>$1</code>");
-    }
+function motionGridHtml(){
+  return `<label>Camera motion — preset look (optional)</label>
+    <div class="chips" id="motionChips">`+
+    presets.cameraMotions.map(m=>`<span class="chip-p ${m.id===sel.motion?'on':''}" data-motion="${m.id}">${esc(m.label)}</span>`).join("")+`</div>`;
+}
+function styleSelectHtml(){
+  return `<label>Style</label><select id="f_style">`+
+    presets.styles.map(s=>`<option value="${s.id}" ${s.id===sel.style?'selected':''}>${esc(s.label)}</option>`).join("")+`</select>`;
+}
+function tierSelectHtml(){
+  return `<label>Quality / cost tier</label><select id="f_tier">`+
+    Object.entries(tiers).map(([k,v])=>`<option value="${k}" ${k===sel.tier?'selected':''}>${esc(v.label)} (×${v.costMult} cost)</option>`).join("")+`</select>`;
+}
+function wirePresetControls(){
+  document.querySelectorAll("#motionChips .chip-p").forEach(c=>c.onclick=()=>{
+    sel.motion=c.dataset.motion;
+    document.querySelectorAll("#motionChips .chip-p").forEach(x=>x.classList.toggle("on",x.dataset.motion===sel.motion));
   });
-  el.innerHTML = html;
+  $("f_style")?.addEventListener("change",e=>sel.style=e.target.value);
+  $("f_tier")?.addEventListener("change",e=>{sel.tier=e.target.value;updateEstimate();});
 }
-function addMsg(role) {
-  const div = document.createElement("div");
-  div.className = "msg " + role;
-  div.innerHTML = '<div class="who">' + (role === "user" ? "You" : "Assistant") + '</div>';
-  const body = document.createElement("div");
-  body.className = "body";
-  div.appendChild(body);
-  $("messages").appendChild(div);
-  return div;
-}
-function scrollDown() { $("messages").scrollTop = $("messages").scrollHeight; }
 
-function renderStoredConversation(conv) {
-  $("messages").innerHTML = "";
-  for (const m of conv.messages) {
-    if (m.role === "user") {
-      const texts = m.content.filter(b => b.type === "text").map(b => b.text);
-      if (texts.length) {
-        const el = addMsg("user");
-        el.querySelector(".body").textContent = texts.join("\n");
-      }
-    } else {
-      const texts = m.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-      const tools = m.content.filter(b => b.type === "tool_use" || b.type === "server_tool_use");
-      const el = addMsg("assistant");
-      const body = el.querySelector(".body");
-      if (tools.length) {
-        const chips = document.createElement("div");
-        tools.forEach(t => {
-          const c = document.createElement("span");
-          c.className = "chip"; c.textContent = "🔧 " + t.name;
-          chips.appendChild(c);
-        });
-        body.appendChild(chips);
-      }
-      if (texts.trim()) {
-        const t = document.createElement("div");
-        renderRich(t, texts);
-        body.appendChild(t);
-      }
-      if (!tools.length && !texts.trim()) el.remove();
-    }
+function renderForm(){
+  uploads={};
+  sel.motion="none"; sel.style="none"; sel.tier=sel.tier||defaultTier;
+  let h="";
+  if(mode==="clip"||mode==="short"){
+    const isShort=mode==="short";
+    h=`
+      <label>Prompt</label>
+      <textarea id="f_prompt" placeholder="${isShort?"e.g. energetic top-down shot of a smoothie being poured, vibrant, punchy":"e.g. cinematic slow dolly across a misty pine forest at dawn, volumetric light"}"></textarea>
+      <label>Reference image (optional — turns this into image→video)</label>
+      ${dropField("image","image/*","Click to upload a start image")}
+      ${motionGridHtml()}
+      <div class="row">
+        <div>${styleSelectHtml()}</div>
+        <div>${tierSelectHtml()}</div>
+      </div>
+      <div class="row">
+        <div><label>Aspect ratio</label><select id="f_ar">${isShort?ARV:ARO}</select></div>
+        <div><label>Duration (sec)</label><input type="text" id="f_dur" value="5" inputmode="numeric"></div>
+        <div><label>Resolution</label><select id="f_res"><option value="">model default</option><option>720p</option><option>1080p</option></select></div>
+      </div>
+      ${isShort?`<label>On-screen caption (optional, burned in)</label><input type="text" id="f_caption" placeholder="POV: your morning just got an upgrade">`:``}
+      <details><summary>Advanced (raw model input override — JSON)</summary>
+        <label>advancedInput</label><textarea id="f_adv" placeholder='{"negative_prompt":"blurry, low quality"}'></textarea>
+        <div class="hint">Merged into the model's input object (wins over the fields above). Use this if a model needs a differently-named key.</div>
+      </details>`;
+  } else if(mode==="avatar"){
+    h=`
+      <label>Portrait photo</label>
+      ${dropField("image","image/*","Click to upload a face/portrait photo")}
+      <label>Voiceover script (generates the voice)</label>
+      <textarea id="f_narr" placeholder="Hey everyone — I tried this for a week and here's what happened…"></textarea>
+      <div class="row">
+        <div><label>Voice</label><input type="text" id="f_voice" value="af_heart"></div>
+      </div>
+      <label>…or upload your own audio instead of a script (optional)</label>
+      ${dropField("audio","audio/*","Click to upload a voice track")}
+      <details><summary>Advanced (raw model input override — JSON)</summary>
+        <label>advancedInput</label><textarea id="f_adv" placeholder='{"seed":42}'></textarea></details>`;
+  } else if(mode==="explainer"){
+    h=`<div class="hint">Each scene gets its own AI voiceover + AI video clip; scenes are stitched into one narrated video with ffmpeg.</div>
+      <div class="row"><div><label>Aspect ratio</label><select id="f_ar">${ARO}</select></div>
+      <div><label>Voice</label><input type="text" id="f_voice" value="af_heart"></div></div>
+      <div class="row"><div>${styleSelectHtml()}</div><div>${tierSelectHtml()}</div></div>
+      <div id="scenes" style="margin-top:14px"></div>
+      <button class="ghost" id="addScene">+ Add scene</button>`;
   }
-  scrollDown();
+  $("form").innerHTML=h;
+  wireUploads();
+  wirePresetControls();
+  if(mode==="explainer"){ $("addScene").onclick=()=>addScene(); addScene(); addScene(); }
+  updateEstimate();
+  ["f_prompt","f_dur","f_narr"].forEach(id=>$(id)?.addEventListener("input",updateEstimate));
 }
 
-// ---------- conversations ----------
-async function refreshConvList() {
-  const r = await fetch("/api/conversations", { headers: headers() });
-  if (r.status === 401) return showLogin();
-  const list = await r.json();
-  const el = $("convList");
-  el.innerHTML = "";
-  for (const c of list) {
-    const item = document.createElement("div");
-    item.className = "convItem" + (currentConv === c.id ? " active" : "");
-    item.innerHTML = (c.mode === "ultra" ? "⚡ " : "💬 ") + escapeHtml(c.title || "Untitled") +
-      '<span class="del" title="Delete">✕</span>';
-    item.onclick = () => openConversation(c.id);
-    item.querySelector(".del").onclick = async (e) => {
-      e.stopPropagation();
-      await fetch("/api/conversations/" + c.id, { method: "DELETE", headers: headers() });
-      if (currentConv === c.id) { currentConv = null; $("messages").innerHTML = ""; }
-      refreshConvList();
-    };
-    el.appendChild(item);
-  }
+function addScene(){
+  const wrap=$("scenes");
+  const idx=wrap.children.length+1;
+  const div=document.createElement("div");
+  div.className="scene";
+  div.innerHTML=`<span class="rm">✕ remove</span><h4>Scene ${idx}</h4>
+    <label>Narration</label><textarea class="s_narr" placeholder="What the voice says in this scene…"></textarea>
+    <label>Visual prompt</label><textarea class="s_vis" placeholder="What the AI video shows in this scene…"></textarea>`;
+  div.querySelector(".rm").onclick=()=>{div.remove();renumber();updateEstimate();};
+  wrap.appendChild(div);
+  div.querySelectorAll("textarea").forEach(t=>t.addEventListener("input",updateEstimate));
+  renumber();updateEstimate();
 }
-async function openConversation(id) {
-  if (streaming) return;
-  const r = await fetch("/api/conversations/" + id, { headers: headers() });
-  if (!r.ok) return;
-  const conv = await r.json();
-  currentConv = id;
-  $("mode").value = conv.mode === "ultra" ? "ultra" : "standard";
-  renderStoredConversation(conv);
-  refreshConvList();
-}
-$("newChat").onclick = () => {
-  if (streaming) return;
-  currentConv = null;
-  $("messages").innerHTML = "";
-  refreshConvList();
-  $("input").focus();
-};
+function renumber(){[...$("scenes").children].forEach((d,i)=>d.querySelector("h4").textContent="Scene "+(i+1));}
 
-// ---------- chat streaming ----------
-$("mode").onchange = () => {
-  $("ultraWarn").style.display = $("mode").value === "ultra" ? "inline" : "none";
-};
-
-async function send() {
-  const text = $("input").value.trim();
-  if (!text || streaming) return;
-  $("input").value = "";
-  streaming = true;
-  $("send").disabled = true;
-
-  const userEl = addMsg("user");
-  userEl.querySelector(".body").textContent = text;
-
-  const asEl = addMsg("assistant");
-  const body = asEl.querySelector(".body");
-  const activity = document.createElement("div");
-  body.appendChild(activity);
-
-  let thinkBox = null, thinkToggle = null, thinkText = "";
-  let answerEl = null, answerText = "";
-  const ensureAnswer = () => {
-    if (!answerEl) { answerEl = document.createElement("div"); body.appendChild(answerEl); }
-    return answerEl;
-  };
-  const ensureThink = () => {
-    if (!thinkBox) {
-      thinkToggle = document.createElement("span");
-      thinkToggle.className = "thinkToggle";
-      thinkToggle.textContent = "▸ thinking";
-      thinkBox = document.createElement("div");
-      thinkBox.className = "thinking";
-      thinkToggle.onclick = () => {
-        thinkBox.classList.toggle("open");
-        thinkToggle.textContent = (thinkBox.classList.contains("open") ? "▾" : "▸") + " thinking";
+function wireUploads(){
+  document.querySelectorAll("[data-drop]").forEach(d=>{
+    const field=d.dataset.drop;
+    const input=d.querySelector("input[type=file]");
+    d.onclick=()=>input.click();
+    input.onchange=()=>{
+      const file=input.files[0];if(!file)return;
+      const reader=new FileReader();
+      reader.onload=()=>{uploads[field]=reader.result;
+        d.classList.add("has");
+        const isImg=file.type.startsWith("image");
+        d.innerHTML=(isImg?"Image ready — click to replace":"Audio ready — click to replace")+
+          (isImg?`<img src="${reader.result}">`:`<audio controls src="${reader.result}"></audio>`);
+        d.appendChild(input);
+        updateEstimate();
       };
-      body.insertBefore(thinkBox, activity.nextSibling);
-      body.insertBefore(thinkToggle, thinkBox);
-    }
-    return thinkBox;
-  };
-  const chip = (label, cls) => {
-    const c = document.createElement("span");
-    c.className = "chip " + (cls || "");
-    c.textContent = label;
-    activity.appendChild(c);
-    scrollDown();
-  };
-  const note = (text, cls) => {
-    const n = document.createElement("div");
-    n.className = cls || "notice";
-    n.textContent = text;
-    body.appendChild(n);
-    scrollDown();
-  };
+      reader.readAsDataURL(file);
+    };
+  });
+}
 
-  try {
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: headers(true),
-      body: JSON.stringify({
-        conversationId: currentConv,
-        message: text,
-        mode: $("mode").value,
-        effort: $("effort").value || undefined,
-      }),
-    });
-    if (resp.status === 401) { showLogin(); throw new Error("Unauthorized"); }
-    if (!resp.ok || !resp.body) {
-      const j = await resp.json().catch(() => ({}));
-      throw new Error(j.error || ("HTTP " + resp.status));
-    }
+// ---------- estimate + collect ----------
+const COST={clip:0.25,short:0.25,avatar:0.5,tts:0.02,t2v:0.25};
+function updateEstimate(){
+  const mult=tiers[sel.tier]?.costMult??1;
+  let est=0;
+  if(mode==="clip"||mode==="short")est=COST.clip*mult;
+  else if(mode==="avatar")est=COST.avatar+($("f_narr")?.value.trim()?COST.tts:0);
+  else if(mode==="explainer")est=($("scenes")?.children.length||0)*(COST.t2v*mult+COST.tts);
+  $("est").textContent="≈ $"+est.toFixed(2)+" (rough estimate"+(tiers[sel.tier]?", "+sel.tier+" tier":"")+")";
+}
+function parseAdv(){try{const v=$("f_adv")?.value.trim();return v?JSON.parse(v):undefined;}catch{throw new Error("Advanced input is not valid JSON.");}}
 
-    // Parse SSE from the fetch body
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
-        const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        let ev = "message", data = "";
-        for (const line of raw.split("\n")) {
-          if (line.startsWith("event: ")) ev = line.slice(7);
-          else if (line.startsWith("data: ")) data += line.slice(6);
-        }
-        if (!data) continue;
-        handleEvent(ev, JSON.parse(data));
-      }
-    }
-  } catch (err) {
-    note(String(err.message || err), "errorBox");
-  } finally {
-    streaming = false;
-    $("send").disabled = false;
-    refreshConvList();
-    scrollDown();
+function fragOf(list,id){return (list.find(x=>x.id===id)||{}).prompt||"";}
+function collect(){
+  if(mode==="clip"||mode==="short"){
+    const prompt=[$("f_prompt").value.trim(),fragOf(presets.styles,sel.style),fragOf(presets.cameraMotions,sel.motion)]
+      .filter(Boolean).join(", ");
+    return {prompt,tier:sel.tier,image:uploads.image,
+      aspectRatio:$("f_ar").value,duration:$("f_dur").value?Number($("f_dur").value):undefined,
+      resolution:$("f_res").value||undefined,caption:$("f_caption")?.value.trim()||undefined,
+      advancedInput:parseAdv()};
   }
-
-  function handleEvent(ev, d) {
-    switch (ev) {
-      case "meta":
-        if (!currentConv) { currentConv = d.conversationId; refreshConvList(); }
-        break;
-      case "text":
-        answerText += d.text;
-        renderRich(ensureAnswer(), answerText);
-        scrollDown();
-        break;
-      case "thinking":
-        thinkText += d.text;
-        ensureThink().textContent = thinkText;
-        break;
-      case "tool_start":
-        chip("🔧 " + d.name);
-        break;
-      case "tool_result":
-        if (!d.ok) chip("✗ " + d.name, "bad");
-        break;
-      case "agent_start":
-        chip("⚡ " + d.agent + " started", "agent");
-        break;
-      case "agent_tool":
-        chip("⚡ " + d.agent + " → " + d.name, "agent");
-        break;
-      case "agent_done":
-        chip("⚡ " + d.agent + (d.ok ? " done" : " failed"), d.ok ? "agent" : "bad");
-        break;
-      case "notice":
-      case "agent_notice":
-        note(d.text);
-        break;
-      case "refusal":
-        note(d.text, "errorBox");
-        break;
-      case "error":
-        note(d.text, "errorBox");
-        break;
-      case "done": {
-        const u = d.usage || {};
-        const n = document.createElement("div");
-        n.className = "usage";
-        n.textContent = "tokens: " + (u.input || 0) + " in / " + (u.output || 0) + " out" +
-          (u.cacheRead ? " (+" + u.cacheRead + " cached)" : "") +
-          (d.approxCostUSD != null ? "  ·  ~$" + d.approxCostUSD : "");
-        body.appendChild(n);
-        break;
-      }
-    }
+  if(mode==="avatar"){
+    return {image:uploads.image,narration:$("f_narr").value.trim()||undefined,
+      audio:uploads.audio,voice:$("f_voice").value.trim()||undefined,advancedInput:parseAdv()};
+  }
+  if(mode==="explainer"){
+    const styleFrag=fragOf(presets.styles,sel.style);
+    const scenes=[...$("scenes").children].map(d=>({
+      narration:d.querySelector(".s_narr").value.trim(),
+      visualPrompt:[d.querySelector(".s_vis").value.trim(),styleFrag].filter(Boolean).join(", ")}));
+    return {scenes,tier:sel.tier,aspectRatio:$("f_ar").value,voice:$("f_voice").value.trim()||undefined};
   }
 }
-$("send").onclick = send;
-$("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+
+// ---------- generate + live stream ----------
+$("generate").onclick=async()=>{
+  let params;
+  try{params=collect();}catch(e){alert(e.message);return;}
+  $("generate").disabled=true;
+  $("live").classList.add("show");
+  $("liveStep").textContent="Queued…";$("liveLog").textContent="";$("liveOut").innerHTML="";
+  try{
+    const r=await fetch("/api/generate",{method:"POST",headers:headers(true),body:JSON.stringify({mode,params})});
+    if(r.status===401){showLogin();throw new Error("Unauthorized");}
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.error||("HTTP "+r.status));
+    currentJobId=j.jobId;
+    streamJob(j.jobId);
+  }catch(e){
+    $("liveStep").textContent="Error: "+e.message;
+    $("generate").disabled=false;
+  }
+};
+$("cancelBtn").onclick=async()=>{ if(currentJobId) await fetch("/api/jobs/"+currentJobId+"/cancel",{method:"POST",headers:headers()}); };
+
+function streamJob(id){
+  const log=(t)=>{$("liveLog").textContent+=t+"\n";$("liveLog").scrollTop=$("liveLog").scrollHeight;};
+  // EventSource can't send auth headers, so parse the SSE via fetch.
+  const ctrl=new AbortController();currentStream=ctrl;
+  fetch("/api/jobs/"+id+"/stream",{headers:headers(),signal:ctrl.signal}).then(async resp=>{
+    const reader=resp.body.getReader();const dec=new TextDecoder();let buf="";
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});let i;
+      while((i=buf.indexOf("\n\n"))>=0){
+        const raw=buf.slice(0,i);buf=buf.slice(i+2);
+        const dl=raw.split("\n").find(l=>l.startsWith("data: "));if(!dl)continue;
+        handle(JSON.parse(dl.slice(6)));
+      }
+    }
+  }).catch(()=>{}).finally(()=>{$("generate").disabled=false;refreshJobs();});
+
+  function handle(evt){
+    if(evt.type==="state"){
+      (evt.progress||[]).forEach(p=>log(p.text));
+      if(evt.step)$("liveStep").textContent=evt.step;
+      if(evt.status==="done")showOutputs(evt.outputs,evt.costEstimateUSD);
+      if(evt.status==="error")$("liveStep").textContent="Error: "+(evt.error||"failed");
+    }else if(evt.type==="progress"){$("liveStep").textContent=evt.text;log(evt.text);}
+    else if(evt.type==="model"){log("  ["+evt.label+"] "+evt.status);}
+    else if(evt.type==="done"){$("liveStep").textContent="Done ✓";showOutputs(evt.outputs,evt.costEstimateUSD);}
+    else if(evt.type==="error"){$("liveStep").textContent="Error: "+evt.text;log("ERROR: "+evt.text);}
+    else if(evt.type==="canceled"){$("liveStep").textContent="Canceled";}
+    else if(evt.type==="end"){currentJobId=null;}
+  }
+  function showOutputs(outputs,cost){
+    $("liveOut").innerHTML=(outputs||[]).map(o=>`<video controls src="${o.url}"></video>`).join("")+
+      (cost!=null?`<div class="hint">≈ $${cost} estimated</div>`:"");
+  }
+}
+
+// ---------- library ----------
+async function refreshJobs(){
+  const r=await fetch("/api/jobs",{headers:headers()});
+  if(r.status===401)return showLogin();
+  const list=await r.json();
+  const el=$("jobs");
+  if(!list.length){el.innerHTML='<div class="empty">No videos yet.</div>';return;}
+  el.innerHTML="";
+  for(const j of list){
+    const card=document.createElement("div");card.className="card";
+    const vid=j.outputs&&j.outputs[0];
+    card.innerHTML=
+      (vid?`<video controls preload="metadata" src="${vid.url}"></video>`:
+        `<div style="padding:24px;text-align:center;color:var(--dim)">${badge(j.status)} ${esc(j.step||"")}</div>`)+
+      `<div class="title">${esc(j.title||"")}</div>
+       <div class="meta"><span class="m-mode">${esc(j.mode)}</span> ${badge(j.status)}
+       <span>≈ $${(j.costEstimateUSD||0).toFixed?(j.costEstimateUSD).toFixed(2):j.costEstimateUSD}</span>
+       <span class="m-act">${vid?`<a href="${vid.url}" download>download</a>`:""}<span class="del" data-id="${j.id}" data-run="${j.status==='running'||j.status==='queued'}">delete</span></span></div>`;
+    card.querySelector(".del").onclick=async(e)=>{
+      const id=e.target.dataset.id;
+      if(e.target.dataset.run==="true"){ if(!confirm("Cancel and delete this running job?"))return; await fetch("/api/jobs/"+id+"/cancel",{method:"POST",headers:headers()}); await new Promise(r=>setTimeout(r,600)); }
+      await fetch("/api/jobs/"+id,{method:"DELETE",headers:headers()});refreshJobs();
+    };
+    el.appendChild(card);
+  }
+}
+function badge(s){return `<span class="badge ${s}">${s}</span>`;}
+$("refresh").onclick=refreshJobs;
+
+// ---------- tabs ----------
+$("tabs").querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
+  $("tabs").querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");mode=t.dataset.mode;renderForm();
 });
 
 // ---------- boot ----------
-(async () => {
-  if (!token || !(await checkAuth())) showLogin();
-  else refreshConvList();
+async function loadPresets(){
+  try{const r=await fetch("/api/presets",{headers:headers()});if(r.ok)presets=await r.json();}catch{}
+}
+(async()=>{
+  if(!token||!(await checkAuth())){showLogin();return;}
+  await loadPresets();
+  renderForm();
+  refreshJobs();
 })();
 </script>
 </body>
